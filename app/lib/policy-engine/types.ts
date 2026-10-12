@@ -63,3 +63,13 @@ export type Decision = {
   reason: string;
   matchedPolicyId: string | null;
 };
+
+export type SkippedPolicy = {
+  policyId?: string;
+  error: string;
+};
+
+export type EvaluationResult = {
+  decision: Decision;
+  skipped: SkippedPolicy[];
+};
