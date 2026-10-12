@@ -1,0 +1,78 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  // Neon pooled connection string (used by the app at runtime)
+  url       = env("DATABASE_URL")
+  // Neon direct (non-pooled) connection string (used by Prisma migrations)
+  directUrl = env("DIRECT_URL")
+}
+
+enum PolicyAction {
+  ALLOW
+  DENY
+  STEP_UP
+}
+
+model ProtectedApp {
+  id          String     @id @default(cuid())
+  name        String
+  slug        String     @unique
+  pathPrefix  String     @unique // e.g. "/apps/finance"
+  upstreamUrl String
+  enabled     Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  policies    Policy[]
+  auditLogs   AuditLog[]
+}
+
+model Policy {
+  id          String        @id @default(cuid())
+  appId       String?
+  app         ProtectedApp? @relation(fields: [appId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  priority    Int           // lower number is evaluated first
+  conditions  Json
+  action      PolicyAction
+  enabled     Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([appId, priority])
+}
+
+model AuditLog {
+  id              String        @id @default(cuid())
+  createdAt       DateTime      @default(now())
+  appId           String?
+  app             ProtectedApp? @relation(fields: [appId], references: [id], onDelete: SetNull)
+  userId          String?
+  userRole        String?
+  path            String
+  method          String
+  ipAddress       String?
+  country         String?
+  deviceSecure    Boolean?
+  decision        PolicyAction
+  matchedPolicyId String?
+  reason          String
+  contextSnapshot Json
+
+  @@index([createdAt])
+  @@index([decision])
+}
+
+model DemoUser {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  role      String
+  createdAt DateTime @default(now())
+}
