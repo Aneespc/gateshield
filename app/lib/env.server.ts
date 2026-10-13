@@ -21,6 +21,16 @@ export const envSchema = z.object({
   SESSION_SECRET: placeholderValidator("SESSION_SECRET", 32),
   GATEWAY_SHARED_SECRET: placeholderValidator("GATEWAY_SHARED_SECRET"),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+  DUMMY_UPSTREAM_BASE_URL: z.string().default("http://localhost:5173"),
+  DEV_COUNTRY: z.string().optional(),
+  VERCEL: z.string().optional(),
+  // Demo Mode: enables simulated country/time controls in the demo console. Must be false in production!
+  DEMO_MODE: z
+    .string()
+    .default("true")
+    .transform((val) => val.toLowerCase() === "true" || val === "1"),
+  // Demo Step-Up verification code for MFA challenge simulation
+  DEMO_STEP_UP_CODE: z.string().default("123456"),
 });
 
 export type Env = z.infer<typeof envSchema>;

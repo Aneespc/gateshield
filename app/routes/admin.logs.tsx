@@ -11,7 +11,12 @@
  * - Include inspection modal for full context snapshots.
  */
 
+import type { MetaFunction } from "react-router";
 import { Link } from "react-router";
+
+export const meta: MetaFunction = () => {
+  return [{ title: "GateShield - Audit Log Viewer" }];
+};
 
 export default function AdminLogs() {
   return (
@@ -21,7 +26,7 @@ export default function AdminLogs() {
           <div>
             <h1 className="text-xl font-bold text-white tracking-tight">Audit Log Viewer</h1>
             <p className="text-xs text-slate-400">
-              Immutable record of zero-trust gateway access decisions and policy evaluations.
+              Immutable record of GateShield access decisions and policy evaluations.
             </p>
           </div>
           <Link

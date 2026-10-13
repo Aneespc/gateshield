@@ -141,6 +141,21 @@ export function evaluateCondition(
       return false;
     }
 
+    case "authAgeMinutes": {
+      if (
+        context.authAgeMinutes === undefined ||
+        typeof context.authAgeMinutes !== "number" ||
+        isNaN(context.authAgeMinutes) ||
+        context.authAgeMinutes < 0
+      ) {
+        return false;
+      }
+      if (condition.op === "lte") {
+        return context.authAgeMinutes <= condition.value;
+      }
+      return false;
+    }
+
     default:
       return false;
   }

@@ -1,26 +1,82 @@
+import { prisma } from "../db.server";
+import type { PolicyAction, RequestContext } from "../policy-engine/types";
+
 /**
- * Audit Log Writer (Stub)
+ * Audit Logging Service
  *
- * Purpose:
- * Records an immutable audit log entry for every evaluation processed by the gateway.
- * Captures request details, context snapshot, policy decision, matched policy ID, and reason.
- * Adheres to principle 5: Every decision is audit-logged, including denials caused by errors.
- *
- * TODO (Step 5):
- * - Persist audit record to Prisma `auditLog` table.
- * - Ensure fail-safe execution: audit logging errors should not crash the request flow,
- *   but must be surfaced to server logs.
+ * Persists an immutable audit log entry for every evaluation processed by the gateway.
+ * Zero Trust Principle:
+ * - Every decision (ALLOW, DENY, STEP_UP) is recorded prior to upstream forwarding.
+ * - If audit writing fails, the gateway fails closed (never forwards).
+ * - Sensitive credentials (cookies, authorization headers, request bodies, secrets) are NEVER captured.
  */
 
-import type { Decision, RequestContext } from "../policy-engine/types";
-
-export interface AuditLogEntryInput {
+export interface AuditLogInput {
+  appId?: string | null;
+  userId?: string | null;
+  userRole?: string | null;
+  path: string;
+  method: string;
+  ipAddress?: string | null;
+  country?: string | null;
+  deviceSecure?: boolean | null;
+  decision: PolicyAction;
+  matchedPolicyId?: string | null;
+  reason: string;
   context: RequestContext;
-  decision: Decision;
-  ipAddress?: string;
+  skippedPolicies?: number;
+  simulated?: {
+    country?: string;
+    time?: string;
+    deviceSecure: boolean;
+  };
 }
 
-export async function writeAuditLog(_entry: AuditLogEntryInput): Promise<void> {
-  // Stub implementation for skeleton milestone
-  // In the skeleton phase, this is a non-blocking stub.
+/**
+ * Writes an audit record to PostgreSQL via Prisma.
+ * Throws upon database error so caller can enforce fail-closed security.
+ *
+ * @returns The generated audit record ID
+ */
+export async function writeAuditLog(entry: AuditLogInput): Promise<string> {
+  const contextSnapshot = {
+    userId: entry.context.userId,
+    role: entry.context.role,
+    deviceSecure: entry.context.deviceSecure,
+    country: entry.context.country,
+    timestamp:
+      entry.context.timestamp instanceof Date
+        ? entry.context.timestamp.toISOString()
+        : String(entry.context.timestamp),
+    path: entry.context.path,
+    method: entry.context.method,
+    appId: entry.context.appId,
+    authAgeMinutes: entry.context.authAgeMinutes,
+    skippedPolicies: entry.skippedPolicies ?? 0,
+    simulated: entry.simulated ?? {
+      deviceSecure: Boolean(entry.context.deviceSecure),
+    },
+  };
+
+  const record = await prisma.auditLog.create({
+    data: {
+      appId: entry.appId ?? null,
+      userId: entry.userId ?? null,
+      userRole: entry.userRole ?? null,
+      path: entry.path,
+      method: entry.method,
+      ipAddress: entry.ipAddress ?? null,
+      country: entry.country ?? null,
+      deviceSecure: entry.deviceSecure ?? null,
+      decision: entry.decision,
+      matchedPolicyId: entry.matchedPolicyId ?? null,
+      reason: entry.reason,
+      contextSnapshot,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  return record.id;
 }

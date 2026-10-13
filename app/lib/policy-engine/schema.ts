@@ -47,11 +47,20 @@ export const TimeOfDayConditionSchema = z
   })
   .strict();
 
+export const AuthAgeConditionSchema = z
+  .object({
+    field: z.literal("authAgeMinutes"),
+    op: z.literal("lte"),
+    value: z.number().min(0, "authAgeMinutes value must be non-negative").finite(),
+  })
+  .strict();
+
 export const ConditionSchema = z.discriminatedUnion("field", [
   RoleConditionSchema,
   DeviceSecureConditionSchema,
   CountryConditionSchema,
   TimeOfDayConditionSchema,
+  AuthAgeConditionSchema,
 ]);
 
 export const ConditionsArraySchema = z
@@ -76,6 +85,7 @@ export const RequestContextSchema = z.object({
   path: z.string(),
   method: z.string(),
   appId: z.string().optional(),
+  authAgeMinutes: z.number().min(0).optional(),
 });
 
 export const DecisionSchema = z.object({

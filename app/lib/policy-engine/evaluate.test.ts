@@ -476,4 +476,141 @@ describe("evaluate (policy engine)", () => {
     const resStepUp = evaluate(baseContext, [policyStepUp]);
     expect(resStepUp.decision.reason).toBe("Step-up required by policy 'Re-auth Required'");
   });
+
+  describe("authAgeMinutes condition", () => {
+    it("evaluates lte correctly (true when within, false when exceeding, true at boundary)", () => {
+      const condition = { field: "authAgeMinutes" as const, op: "lte" as const, value: 15 };
+
+      expect(evaluateCondition(condition, { ...baseContext, authAgeMinutes: 0 })).toBe(true);
+      expect(evaluateCondition(condition, { ...baseContext, authAgeMinutes: 10 })).toBe(true);
+      expect(evaluateCondition(condition, { ...baseContext, authAgeMinutes: 15 })).toBe(true); // boundary
+      expect(evaluateCondition(condition, { ...baseContext, authAgeMinutes: 16 })).toBe(false);
+      expect(evaluateCondition(condition, { ...baseContext, authAgeMinutes: 120 })).toBe(false);
+    });
+
+    it("evaluates to false (fail closed) when authAgeMinutes is undefined or NaN in context", () => {
+      const condition = { field: "authAgeMinutes" as const, op: "lte" as const, value: 15 };
+
+      // Missing in context
+      expect(evaluateCondition(condition, { ...baseContext, authAgeMinutes: undefined })).toBe(false);
+      // NaN in context
+      expect(evaluateCondition(condition, { ...baseContext, authAgeMinutes: Number.NaN })).toBe(false);
+      // Negative in context
+      expect(evaluateCondition(condition, { ...baseContext, authAgeMinutes: -5 })).toBe(false);
+    });
+
+    it("skips policies with invalid authAgeMinutes condition values", () => {
+      const badPolicies = [
+        // Negative value
+        {
+          id: "bad-neg",
+          name: "Negative Auth Age",
+          priority: 1,
+          enabled: true,
+          action: "ALLOW",
+          conditions: [{ field: "authAgeMinutes", op: "lte", value: -1 }],
+        },
+        // Non-number value
+        {
+          id: "bad-str",
+          name: "String Auth Age",
+          priority: 2,
+          enabled: true,
+          action: "ALLOW",
+          conditions: [{ field: "authAgeMinutes", op: "lte", value: "15" }],
+        },
+        // Unsupported operator
+        {
+          id: "bad-op",
+          name: "Wrong Operator Auth Age",
+          priority: 3,
+          enabled: true,
+          action: "ALLOW",
+          conditions: [{ field: "authAgeMinutes", op: "gte", value: 15 }],
+        },
+        // Infinity
+        {
+          id: "bad-inf",
+          name: "Infinity Auth Age",
+          priority: 4,
+          enabled: true,
+          action: "ALLOW",
+          conditions: [{ field: "authAgeMinutes", op: "lte", value: Number.POSITIVE_INFINITY }],
+        },
+      ];
+
+      const result = evaluate({ ...baseContext, authAgeMinutes: 5 }, badPolicies);
+
+      expect(result.decision.action).toBe("DENY");
+      expect(result.skipped).toHaveLength(4);
+      expect(result.skipped.map((s) => s.policyId)).toEqual([
+        "bad-neg",
+        "bad-str",
+        "bad-op",
+        "bad-inf",
+      ]);
+    });
+
+    it("evaluates Admin fresh vs stale step-up policies deterministically", () => {
+      const adminPolicies: PolicyDefinition[] = [
+        {
+          id: "admin-fresh-allow",
+          name: "Admin Fresh Allow",
+          priority: 10,
+          enabled: true,
+          action: "ALLOW",
+          conditions: [
+            { field: "role", op: "in", value: ["admin"] },
+            { field: "deviceSecure", op: "eq", value: true },
+            { field: "timeOfDay", op: "between", value: { start: "09:00", end: "18:00" } },
+            { field: "authAgeMinutes", op: "lte", value: 15 },
+          ],
+        },
+        {
+          id: "admin-stale-step-up",
+          name: "Admin Stale Step Up",
+          priority: 20,
+          enabled: true,
+          action: "STEP_UP",
+          conditions: [
+            { field: "role", op: "in", value: ["admin"] },
+            { field: "deviceSecure", op: "eq", value: true },
+            { field: "timeOfDay", op: "between", value: { start: "09:00", end: "18:00" } },
+          ],
+        },
+      ];
+
+      const adminCtx: RequestContext = {
+        timestamp: new Date("2026-10-12T12:00:00.000Z"), // 12:00 UTC (inside 09:00-18:00)
+        path: "/apps/admin",
+        method: "GET",
+        role: "admin",
+        deviceSecure: true,
+        country: "US",
+        userId: "admin-1",
+        appId: "app-admin",
+      };
+
+      // Scenario 1: Fresh login (authAgeMinutes = 5) -> ALLOW by policy 10
+      const freshResult = evaluate({ ...adminCtx, authAgeMinutes: 5 }, adminPolicies);
+      expect(freshResult.decision.action).toBe("ALLOW");
+      expect(freshResult.decision.matchedPolicyId).toBe("admin-fresh-allow");
+
+      // Scenario 2: Stale login (authAgeMinutes = 30) -> STEP_UP by policy 20
+      const staleResult = evaluate({ ...adminCtx, authAgeMinutes: 30 }, adminPolicies);
+      expect(staleResult.decision.action).toBe("STEP_UP");
+      expect(staleResult.decision.matchedPolicyId).toBe("admin-stale-step-up");
+
+      // Scenario 3: Undefined auth age -> STEP_UP by policy 20 (fails fresh check, matches stale)
+      const missingAgeResult = evaluate({ ...adminCtx, authAgeMinutes: undefined }, adminPolicies);
+      expect(missingAgeResult.decision.action).toBe("STEP_UP");
+      expect(missingAgeResult.decision.matchedPolicyId).toBe("admin-stale-step-up");
+
+      // Scenario 4: Admin outside business hours (20:00 UTC) -> DENY (neither policy matches)
+      const afterHoursCtx = { ...adminCtx, timestamp: new Date("2026-10-12T20:00:00.000Z"), authAgeMinutes: 5 };
+      const afterHoursResult = evaluate(afterHoursCtx, adminPolicies);
+      expect(afterHoursResult.decision.action).toBe("DENY");
+      expect(afterHoursResult.decision.matchedPolicyId).toBeNull();
+    });
+  });
 });

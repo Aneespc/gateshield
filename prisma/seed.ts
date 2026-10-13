@@ -7,12 +7,17 @@ const prisma = new PrismaClient();
 async function main() {
   console.log("🌱 Starting database seed...");
 
+  const rawBaseUrl = process.env.DUMMY_UPSTREAM_BASE_URL || "http://localhost:5173";
+  const upstreamBase = rawBaseUrl.endsWith("/") ? rawBaseUrl.slice(0, -1) : rawBaseUrl;
+
+  console.log(`  ℹ Using upstream base URL: ${upstreamBase}`);
+
   // 1. Seed Demo Users
   const demoUsers = [
-    { email: "admin@ztgate.local", name: "Alice Admin", role: "admin" },
-    { email: "finance@ztgate.local", name: "Bob Finance", role: "finance" },
-    { email: "hr@ztgate.local", name: "Carol HR", role: "hr" },
-    { email: "intern@ztgate.local", name: "Dave Intern", role: "intern" },
+    { email: "admin@gateshield.local", name: "Alice Admin", role: "admin" },
+    { email: "finance@gateshield.local", name: "Bob Finance", role: "finance" },
+    { email: "hr@gateshield.local", name: "Carol HR", role: "hr" },
+    { email: "intern@gateshield.local", name: "Dave Intern", role: "intern" },
   ];
 
   for (const user of demoUsers) {
@@ -30,19 +35,19 @@ async function main() {
       name: "HR Portal",
       slug: "hr",
       pathPrefix: "/apps/hr",
-      upstreamUrl: "http://localhost:3000/dummy/hr",
+      upstreamUrl: `${upstreamBase}/dummy/hr`,
     },
     {
       name: "Finance Hub",
       slug: "finance",
       pathPrefix: "/apps/finance",
-      upstreamUrl: "http://localhost:3000/dummy/finance",
+      upstreamUrl: `${upstreamBase}/dummy/finance`,
     },
     {
       name: "Admin Console",
       slug: "admin",
       pathPrefix: "/apps/admin",
-      upstreamUrl: "http://localhost:3000/dummy/admin",
+      upstreamUrl: `${upstreamBase}/dummy/admin`,
     },
   ];
 
@@ -51,11 +56,16 @@ async function main() {
   for (const app of appsData) {
     const saved = await prisma.protectedApp.upsert({
       where: { slug: app.slug },
-      update: { name: app.name, pathPrefix: app.pathPrefix, upstreamUrl: app.upstreamUrl },
+      update: {
+        name: app.name,
+        pathPrefix: app.pathPrefix,
+        upstreamUrl: app.upstreamUrl,
+        enabled: true,
+      },
       create: app,
     });
     appMap.set(saved.slug, saved.id);
-    console.log(`  ✓ ProtectedApp: ${app.name} (${app.pathPrefix})`);
+    console.log(`  ✓ ProtectedApp: ${app.name} (${app.pathPrefix}) -> ${app.upstreamUrl}`);
   }
 
   // 3. Starter Policies
@@ -66,12 +76,32 @@ async function main() {
   ];
   ConditionsArraySchema.parse(financeConditions);
 
-  // Policy 2: Admin app allows only role "admin" during 09:00-18:00
-  const adminConditions: Condition[] = [
+  // Clean up legacy admin policy name if it exists
+  if (appMap.get("admin")) {
+    await prisma.policy.deleteMany({
+      where: {
+        appId: appMap.get("admin"),
+        name: "Admin: Allow admin role during business hours",
+      },
+    });
+  }
+
+  // Policy 2a: Admin app allows role "admin" on secure device during 09:00-18:00 UTC if auth is fresh (<= 15 min)
+  const adminFreshConditions: Condition[] = [
     { field: "role", op: "in", value: ["admin"] },
+    { field: "deviceSecure", op: "eq", value: true },
+    { field: "timeOfDay", op: "between", value: { start: "09:00", end: "18:00" } },
+    { field: "authAgeMinutes", op: "lte", value: 15 },
+  ];
+  ConditionsArraySchema.parse(adminFreshConditions);
+
+  // Policy 2b: Admin app triggers STEP_UP if role "admin" on secure device during 09:00-18:00 UTC with stale auth (> 15 min)
+  const adminStepUpConditions: Condition[] = [
+    { field: "role", op: "in", value: ["admin"] },
+    { field: "deviceSecure", op: "eq", value: true },
     { field: "timeOfDay", op: "between", value: { start: "09:00", end: "18:00" } },
   ];
-  ConditionsArraySchema.parse(adminConditions);
+  ConditionsArraySchema.parse(adminStepUpConditions);
 
   // Policy 3: HR app allows role "hr" or "admin"
   const hrConditions: Condition[] = [
@@ -91,11 +121,20 @@ async function main() {
     },
     {
       appId: appMap.get("admin"),
-      name: "Admin: Allow admin role during business hours",
-      description: "Restricts admin console access to 09:00-18:00 for admin role",
+      name: "Admin: Allow fresh login during business hours",
+      description: "Restricts admin console to admin role, secure posture, business hours (09:00-18:00 UTC), and fresh authentication (<= 15 min)",
       priority: 10,
       action: "ALLOW" as const,
-      conditions: adminConditions,
+      conditions: adminFreshConditions,
+      enabled: true,
+    },
+    {
+      appId: appMap.get("admin"),
+      name: "Admin: Step-up reauth required for stale session",
+      description: "Requires step-up re-authentication if session is older than 15 minutes during business hours",
+      priority: 20,
+      action: "STEP_UP" as const,
+      conditions: adminStepUpConditions,
       enabled: true,
     },
     {

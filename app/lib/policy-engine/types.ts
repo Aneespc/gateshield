@@ -32,11 +32,18 @@ export type TimeOfDayCondition = {
   };
 };
 
+export type AuthAgeCondition = {
+  field: "authAgeMinutes";
+  op: "lte";
+  value: number; // Non-negative number of minutes
+};
+
 export type Condition =
   | RoleCondition
   | DeviceSecureCondition
   | CountryCondition
-  | TimeOfDayCondition;
+  | TimeOfDayCondition
+  | AuthAgeCondition;
 
 export type PolicyDefinition = {
   id: string;
@@ -56,6 +63,7 @@ export type RequestContext = {
   path: string;
   method: string;
   appId?: string;
+  authAgeMinutes?: number;
 };
 
 export type Decision = {

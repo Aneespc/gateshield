@@ -12,7 +12,12 @@
  * - Add dry-run policy evaluation simulator.
  */
 
+import type { MetaFunction } from "react-router";
 import { Link } from "react-router";
+
+export const meta: MetaFunction = () => {
+  return [{ title: "GateShield - Policy Editor" }];
+};
 
 export default function AdminPolicies() {
   return (

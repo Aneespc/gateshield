@@ -1,5 +1,6 @@
 {
   "name": "gateshield",
+  "description": "A zero-trust access gateway that evaluates every request against identity, device posture, location and time before it reaches your apps.",
   "private": true,
   "type": "module",
   "scripts": {
